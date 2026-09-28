@@ -9,6 +9,7 @@ __pycache__/
 # Hasil scraping
 hasil_*.csv
 
+
 # OS / editor
 .DS_Store
 Thumbs.db

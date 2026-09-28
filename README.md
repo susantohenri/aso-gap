@@ -4,20 +4,23 @@ Tool kecil untuk mencari **celah keyword (keyword gap)** di Google Play Store.
 
 Cara kerjanya:
 
-1. Ambil banyak *search suggestion* dari seed keyword (pakai teknik alphabet expansion: `seed a`, `seed b`, ... `seed z`).
-2. Cek satu per satu di Google Play: berapa app yang muncul untuk keyword itu.
-3. Simpan keyword dengan hasil **0** atau **sangat sedikit** ke CSV. Ini kandidat niche yang belum digarap.
+1. Ambil banyak *search suggestion* langsung dari kolom pencarian Play Store menggunakan Playwright (dengan teknik alphabet expansion: `seed a`, `seed b`, ... `seed z`).
+2. Cek satu per satu di Google Play via `google-play-scraper`: berapa aplikasi yang muncul untuk keyword tersebut.
+3. Simpan keyword dengan hasil **0** atau **sangat sedikit** ke CSV. Ini kandidat niche yang belum digarap kompetitor.
 
-## Catatan penting
+## Fitur Utama
 
-- Suggestion diambil dari **autocomplete Google Search umum** (`suggestqueries.google.com`), bukan dari kolom search Play Store. Endpoint autocomplete Play Store yang lama sudah mati (404). Hasilnya kurang lebih mirip, tapi tidak identik. Kata tambahan seperti `aplikasi` di `EXTRA` membantu menggeser suggestion ke arah app.
-- Play Store hampir selalu mengembalikan sesuatu untuk query apa pun, jadi hasil **benar-benar 0** itu langka. Karena itu ada juga output `hasil_sedikit.csv` (hasil 0 sampai N).
-- Endpoint yang dipakai tidak resmi dan bisa berubah kapan saja. Kalau script berhenti jalan, cek dulu endpoint-nya.
+- **Real Play Store Suggestions**: Saran diambil langsung dari kolom pencarian Play Store web via Playwright (bukan Google Search biasa).
+- **Target Global & Regional**: Default ke pasar global Play Store (`en-us`), dan mudah diarahkan ke negara/bahasa lain via argumen CLI.
+- **Auto-Save & Resume**: Hasil disimpan berkala ke CSV tiap kali satu kata kunci selesai diperiksa. Jika terputus di tengah jalan, script otomatis melanjutkan tanpa mengulang dari awal.
+- **Validasi Seed Input**: Menolak query kosong agar tidak membuang waktu mengambil saran acak yang tidak relevan.
+- **Mode Tes Cepat (`--test`)**: Memverifikasi koneksi Playwright dan scraper dalam hitungan detik tanpa scraping penuh.
 
 ## Kebutuhan
 
 - Python 3.9+
 - Koneksi internet
+- Browser Chromium untuk Playwright
 
 ## Setup (Windows 11)
 
@@ -32,6 +35,9 @@ venv\Scripts\activate
 
 # 3. Install dependency
 pip install -r requirements.txt
+
+# 4. Install Chromium browser untuk Playwright
+playwright install chromium
 ```
 
 Kalau muncul error *execution policy* saat aktivasi di PowerShell, jalankan sekali:
@@ -48,61 +54,74 @@ lalu ulangi langkah 2.
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+playwright install chromium
 ```
 
-## Cara pakai
+## Cara Pakai
 
-1. Buka `scrape.py`, atur konfigurasi di bagian atas file:
+Jalankan langsung melalui command line dengan menyertakan kata kunci utama (*seed*):
 
-   | Variabel | Fungsi | Contoh |
-   |---|---|---|
-   | `SEED` | Keyword utama / niche yang dicari | `"editor foto"` |
-   | `EXTRA` | Kata tambahan biar suggestion condong ke app. Kosongkan `""` untuk menonaktifkan | `"aplikasi"` |
-   | `MAX_HASIL_DIANGGAP_SEDIKIT` | Batas atas jumlah hasil untuk masuk `hasil_sedikit.csv` | `3` |
+```powershell
+# Contoh pencarian pasar Global (default: en-us)
+python scrape.py "photo editor"
 
-2. Jalankan:
+# Contoh pencarian pasar Indonesia
+python scrape.py "editor foto" --hl id --gl id
 
-   ```powershell
-   python scrape.py
-   ```
+# Contoh dengan kata tambahan
+python scrape.py "fitness tracker" --extra "app"
+```
 
-3. Tunggu sampai muncul tulisan `Selesai`. Estimasi: sekitar 1,5 detik per keyword ditambah 27 request suggestion di awal. Untuk 150 keyword kira-kira 4-5 menit.
+### Opsi CLI
+
+| Argumen / Opsi | Keterangan | Default | Contoh |
+|---|---|---|---|
+| `seed` *(wajib)* | Kata kunci utama / niche yang dicari | - | `"photo editor"` |
+| `--extra` | Kata tambahan pada query | `""` | `--extra "app"` |
+| `--hl` | Bahasa Play Store (*Host Language*) | `"en"` | `--hl id` |
+| `--gl` | Negara katalog Play Store (*Geolocation*) | `"us"` | `--gl id` |
+| `--max-few` | Batas maksimal hasil untuk `hasil_sedikit.csv` | `3` | `--max-few 5` |
+| `--headful` | Tampilkan jendela browser saat scraping | `False` (headless) | `--headful` |
+| `--test` | Tes cepat 1 query tanpa scraping 27 query | `False` | `--test` |
+
+## Tes Cepat (`--test`)
+
+Untuk mengecek apakah koneksi Playwright ke Play Store dan scraper berfungsi dengan baik tanpa menunggu seluruh 27 query selesai:
+
+```powershell
+python scrape.py "photo editor" --test
+```
+
+Jika sukses, terminal akan menampilkan `Status: OK` beserta daftar saran kata kunci dan jumlah aplikasi yang terdeteksi.
 
 ## Output
+
+Setiap file CSV memiliki 2 kolom sederhana: `keyword` dan `jumlah_hasil`:
 
 | File | Isi |
 |---|---|
 | `hasil_semua.csv` | Semua keyword beserta jumlah hasilnya (`-1` berarti error saat dicek) |
 | `hasil_nol.csv` | Keyword dengan hasil persis 0 |
-| `hasil_sedikit.csv` | Keyword dengan hasil 0 sampai `MAX_HASIL_DIANGGAP_SEDIKIT` |
+| `hasil_sedikit.csv` | Keyword dengan hasil 0 sampai `max-few` |
 
-## Cek endpoint (troubleshooting)
-
-Kalau script tidak menghasilkan suggestion sama sekali, tes endpoint-nya dulu:
-
-```powershell
-python test.py
-```
-
-Harusnya muncul `Status: 200` dan daftar keyword. Kalau status 404 atau kosong, endpoint sudah berubah dan perlu diganti.
+> **Catatan Resume**: Jika file `hasil_semua.csv` sudah ada, script akan otomatis mendeteksi keyword yang sudah selesai diproses dan melewatinya. Untuk memulai pencarian baru dari nol, hapus file CSV hasil sebelum menjalankan script.
 
 ## Tips
 
-- **Jangan terlalu cepat.** Jeda `time.sleep` di script sengaja dipasang supaya tidak kena rate limit atau captcha. Kalau mau dipercepat, naikkan risiko diblok sementara.
+- **Jeda Otomatis**: Script sudah dilengkapi jeda acak alami (1.5-3.5 detik) antar query untuk menghindari pemblokiran/captcha dari Google.
 - Coba beberapa seed berbeda dan gabungkan hasilnya.
-- Hasil 0 belum tentu peluang bagus. Cek juga apakah ada orang yang benar-benar mencari keyword itu (volume), bukan cuma tidak ada kompetitor.
+- Hasil 0 belum tentu peluang bagus. Cek juga apakah ada orang yang benar-benar mencari keyword itu (volume pencarian), bukan sekadar tidak ada kompetitor.
 
-## Struktur repo
+## Struktur Repo
 
 ```
 aso-gap/
-├── scrape.py          # script utama
-├── test.py            # tes endpoint suggestion
-├── requirements.txt
-├── .gitignore
-└── README.md
+├── scrape.py          # script utama (CLI, Playwright suggestion, scraper, & mode --test)
+├── requirements.txt   # daftar dependency Python
+├── .gitignore         # aturan pengabaian file git (venv, cache, CSV hasil)
+└── README.md          # dokumentasi
 ```
 
-## Lisensi & disclaimer
+## Lisensi & Disclaimer
 
-Proyek ini memakai endpoint dan halaman publik Google yang tidak punya API resmi. Gunakan dengan wajar, patuhi ketentuan layanan Google, dan jangan dipakai untuk scraping dalam skala besar.
+Proyek ini memakai halaman web publik Google Play Store yang tidak memiliki API publik resmi. Gunakan dengan wajar, patuhi ketentuan layanan Google, dan jangan dipakai untuk scraping dalam skala berlebihan.
