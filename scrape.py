@@ -168,7 +168,7 @@ def collect_playstore_suggestions(queries: List[str], hl: str = "en", gl: str = 
         page.goto(target_url, wait_until="networkidle", timeout=30000)
 
         # Temukan tombol pencarian dan input
-        search_btn = page.query_selector('button[aria-label*="Search" i], button[aria-label*="Telusuri" i], [aria-label*="search" i]')
+        search_btn = page.query_selector('button:has-text("search"), button[aria-label*="Search" i], button[aria-label*="Telusuri" i], button[aria-label*="Cari" i], [aria-label*="search" i]')
         if search_btn and search_btn.is_visible():
             search_btn.click()
             page.wait_for_timeout(500)

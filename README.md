@@ -84,13 +84,88 @@ python scrape.py "photo editor" --resume
 |---|---|---|---|
 | `seed` *(wajib)* | Kata kunci utama / niche yang dicari | - | `"photo editor"` |
 | `--extra` | Kata tambahan pada query | `""` | `--extra "app"` |
-| `--hl` | Bahasa Play Store (*Host Language*) | `"en"` | `--hl id` |
-| `--gl` | Negara katalog Play Store (*Geolocation*) | `"us"` | `--gl id` |
+| `--hl` | Bahasa Play Store (*Host Language*, ISO 639-1) | `"en"` | `--hl id` |
+| `--gl` | Negara katalog Play Store (*Geolocation*, ISO 3166-1) | `"us"` | `--gl id` |
 | `--max-few` | Batas maksimal hasil relevan untuk file `sedikit` | `3` | `--max-few 5` |
 | `--resume` | Lanjutkan proses dari file CSV yang sudah ada | `False` | `--resume` |
 | `--prefix` | Prefix kustom nama file output CSV | `hasil_<seed>` | `--prefix "riset_game"` |
 | `--headful` | Tampilkan jendela browser saat scraping | `False` (headless) | `--headful` |
 | `--test` | Tes cepat 1 query tanpa scraping 27 query | `False` | `--test` |
+
+### Referensi Kode Bahasa (`--hl`) & Negara (`--gl`) Berdasarkan eCPM AdMob
+
+Urutan tier target pasar monetisasi AdMob dari eCPM tertinggi hingga terendah.
+
+> [!WARNING]
+> **Penting:**
+> - `--hl` (*Host Language*): Kode bahasa 2 huruf (ISO 639-1).
+> - `--gl` (*Geolocation*): Kode negara 2 huruf (ISO 3166-1 alpha-2).
+> - Jangan tertukar! Contoh kasus Malaysia: gunakan `--hl ms --gl my`. Jika menggunakan `--hl my`, Google Play akan dibuka dalam bahasa Burma/Myanmar.
+
+#### Tier 1 (eCPM Tertinggi / High-Yield)
+Negara dengan lelang iklan tertinggi (estimasi US\$15 – US\$40+ pada interstitial & rewarded ads).
+
+| Negara | Kode Negara (`--gl`) | Bahasa Utama | Kode Bahasa (`--hl`) | Contoh Perintah |
+|---|---|---|---|---|
+| Amerika Serikat | `us` | English | `en` | `python scrape.py "keyword" --hl en --gl us` |
+| Australia | `au` | English | `en` | `python scrape.py "keyword" --hl en --gl au` |
+| Kanada | `ca` | English / French | `en` / `fr` | `python scrape.py "keyword" --hl en --gl ca` |
+| Inggris Raya (UK) | `gb` | English | `en` | `python scrape.py "keyword" --hl en --gl gb` |
+| Swiss | `ch` | German / French | `de` / `fr` | `python scrape.py "keyword" --hl de --gl ch` |
+| Jerman | `de` | German | `de` | `python scrape.py "keyword" --hl de --gl de` |
+| Norwegia | `no` | Norwegian | `no` | `python scrape.py "keyword" --hl no --gl no` |
+| Swedia | `se` | Swedish | `sv` | `python scrape.py "keyword" --hl sv --gl se` |
+| Denmark | `dk` | Danish | `da` | `python scrape.py "keyword" --hl da --gl dk` |
+| Belanda | `nl` | Dutch | `nl` | `python scrape.py "keyword" --hl nl --gl nl` |
+| Selandia Baru | `nz` | English | `en` | `python scrape.py "keyword" --hl en --gl nz` |
+| Jepang | `jp` | Japanese | `ja` | `python scrape.py "keyword" --hl ja --gl jp` |
+| Korea Selatan | `kr` | Korean | `ko` | `python scrape.py "keyword" --hl ko --gl kr` |
+| Singapura | `sg` | English / Chinese | `en` / `zh` | `python scrape.py "keyword" --hl en --gl sg` |
+| Prancis | `fr` | French | `fr` | `python scrape.py "keyword" --hl fr --gl fr` |
+| Austria | `at` | German | `de` | `python scrape.py "keyword" --hl de --gl at` |
+| Belgia | `be` | Dutch / French | `nl` / `fr` | `python scrape.py "keyword" --hl nl --gl be` |
+| Finlandia | `fi` | Finnish | `fi` | `python scrape.py "keyword" --hl fi --gl fi` |
+| Irlandia | `ie` | English | `en` | `python scrape.py "keyword" --hl en --gl ie` |
+| Uni Emirat Arab | `ae` | Arabic / English | `ar` / `en` | `python scrape.py "keyword" --hl ar --gl ae` |
+| Arab Saudi | `sa` | Arabic | `ar` | `python scrape.py "keyword" --hl ar --gl sa` |
+
+#### Tier 2 (eCPM Menengah / Medium-Yield)
+Pasar dengan eCPM stabil (estimasi US\$5 – US\$15) dan volume pengguna menengah-keatas.
+
+| Negara | Kode Negara (`--gl`) | Bahasa Utama | Kode Bahasa (`--hl`) | Contoh Perintah |
+|---|---|---|---|---|
+| Italia | `it` | Italian | `it` | `python scrape.py "keyword" --hl it --gl it` |
+| Spanyol | `es` | Spanish | `es` | `python scrape.py "keyword" --hl es --gl es` |
+| Taiwan | `tw` | Chinese (Tradisional) | `zh` | `python scrape.py "keyword" --hl zh --gl tw` |
+| Hong Kong | `hk` | Chinese / English | `zh` / `en` | `python scrape.py "keyword" --hl zh --gl hk` |
+| Israel | `il` | Hebrew | `iw` / `he` | `python scrape.py "keyword" --hl iw --gl il` |
+| Polandia | `pl` | Polish | `pl` | `python scrape.py "keyword" --hl pl --gl pl` |
+| Portugal | `pt` | Portuguese | `pt` | `python scrape.py "keyword" --hl pt --gl pt` |
+| Ceko | `cz` | Czech | `cs` | `python scrape.py "keyword" --hl cs --gl cz` |
+| Yunani | `gr` | Greek | `el` | `python scrape.py "keyword" --hl el --gl gr` |
+| Afrika Selatan | `za` | English | `en` | `python scrape.py "keyword" --hl en --gl za` |
+| Malaysia | `my` | Melayu / English | `ms` / `en` | `python scrape.py "keyword" --hl ms --gl my` |
+| Thailand | `th` | Thai | `th` | `python scrape.py "keyword" --hl th --gl th` |
+| Meksiko | `mx` | Spanish | `es` | `python scrape.py "keyword" --hl es --gl mx` |
+| Chili | `cl` | Spanish | `es` | `python scrape.py "keyword" --hl es --gl cl` |
+| Brasil | `br` | Portuguese | `pt` | `python scrape.py "keyword" --hl pt --gl br` |
+
+#### Tier 3 (Volume Tinggi / eCPM Rendah)
+Pasar dengan unduhan & impresi sangat masif, tetapi eCPM relatif rendah (estimasi US\$0.50 – US\$4).
+
+| Negara | Kode Negara (`--gl`) | Bahasa Utama | Kode Bahasa (`--hl`) | Contoh Perintah |
+|---|---|---|---|---|
+| Indonesia | `id` | Indonesian | `id` | `python scrape.py "keyword" --hl id --gl id` |
+| Filipina | `ph` | English / Tagalog | `en` / `tl` | `python scrape.py "keyword" --hl en --gl ph` |
+| Vietnam | `vn` | Vietnamese | `vi` | `python scrape.py "keyword" --hl vi --gl vn` |
+| Turki | `tr` | Turkish | `tr` | `python scrape.py "keyword" --hl tr --gl tr` |
+| Kolombia | `co` | Spanish | `es` | `python scrape.py "keyword" --hl es --gl co` |
+| Argentina | `ar` | Spanish | `es` | `python scrape.py "keyword" --hl es --gl ar` |
+| Mesir | `eg` | Arabic | `ar` | `python scrape.py "keyword" --hl ar --gl eg` |
+| India | `in` | Hindi / English | `hi` / `en` | `python scrape.py "keyword" --hl en --gl in` |
+| Pakistan | `pk` | Urdu / English | `ur` / `en` | `python scrape.py "keyword" --hl en --gl pk` |
+| Nigeria | `ng` | English | `en` | `python scrape.py "keyword" --hl en --gl ng` |
+| Bangladesh | `bd` | Bengali | `bn` | `python scrape.py "keyword" --hl bn --gl bd` |
 
 ## Tes Cepat (`--test`)
 
