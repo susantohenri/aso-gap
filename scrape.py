@@ -2,10 +2,11 @@ import argparse
 import csv
 import os
 import random
+import re
 import string
 import sys
 import time
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Tuple
 
 # Pastikan output terminal di Windows mendukung UTF-8
 if sys.platform.startswith("win"):
@@ -23,9 +24,65 @@ MIN_DELAY = 1.5  # Jeda minimal antar query Playwright (detik)
 MAX_DELAY = 3.5  # Jeda maksimal antar query Playwright (detik)
 MAX_RETRIES = 2  # Batas percobaan ulang jika dropdown gagal muncul
 
-CSV_ALL = "hasil_semua.csv"
-CSV_ZERO = "hasil_nol.csv"
-CSV_FEW = "hasil_sedikit.csv"
+CSV_HEADER = ["keyword", "total_hasil", "hasil_relevan", "daftar_app_relevan"]
+
+STOP_WORDS = {
+    # English
+    "a", "an", "the", "and", "or", "for", "of", "in", "on", "at", "to", "with",
+    "by", "from", "is", "it", "as", "be", "this", "that", "app", "apps", "free",
+    "new", "best", "pro", "online", "game", "games",
+    # Indonesian
+    "dan", "di", "ke", "dari", "untuk", "yang", "pada", "dengan", "atau", "ini",
+    "itu", "aplikasi", "gratis", "terbaru", "terbaik", "cara"
+}
+
+
+def get_clean_tokens(text: str) -> List[str]:
+    """Mengambil token/kata bersih tanpa tanda baca dan stop words umum."""
+    words = re.findall(r"[a-zA-Z0-9]+", text.lower())
+    meaningful = [w for w in words if w not in STOP_WORDS and len(w) > 1]
+    return meaningful if meaningful else words
+
+
+def is_app_relevant(query: str, app: dict) -> bool:
+    """
+    Menilai apakah aplikasi relevan dengan query pencarian (bukan filler rekomendasi algoritma).
+    Menggunakan kombinasi exact match, token overlap di Judul/AppId, dan snippet deskripsi.
+    """
+    query_clean = query.lower().strip()
+    q_tokens = get_clean_tokens(query)
+    if not q_tokens:
+        return True
+
+    title = (app.get("title") or "").lower()
+    app_id = (app.get("appId") or "").lower()
+    desc = (app.get("description") or "").lower()
+
+    # 1. Exact phrase match di title, appId, atau deskripsi
+    if query_clean in title or query_clean in app_id or query_clean in desc:
+        return True
+
+    # 2. Token matching di Title / App ID (sinyal ASO terkuat)
+    title_matches = [t for t in q_tokens if t in title or t in app_id]
+
+    # Jika query hanya 1 kata utama: wajib ada di title atau app_id
+    if len(q_tokens) == 1:
+        return len(title_matches) >= 1
+
+    # Jika query multi-kata:
+    # Setidaknya 50% kata query muncul di title/app_id
+    ratio_title = len(title_matches) / len(q_tokens)
+    if ratio_title >= 0.5:
+        return True
+
+    # Atau minimal 1 kata di title/app_id DAN kata lainnya tersebar di deskripsi (>= 60% token cover)
+    if len(title_matches) >= 1:
+        desc_matches = [t for t in q_tokens if t in desc]
+        all_matched = set(title_matches + desc_matches)
+        if (len(all_matched) / len(q_tokens)) >= 0.6:
+            return True
+
+    return False
 
 
 def get_queries(seed: str, extra: str = "") -> List[str]:
@@ -120,7 +177,7 @@ def collect_playstore_suggestions(queries: List[str], hl: str = "en", gl: str = 
         input_locator.wait_for(state="visible", timeout=10000)
 
         total_queries = len(queries)
-        print(f"      Menjalankan {total_queries} query...")
+        print(f"      Menjalankan {total_queries} query ekspansi alfabet...")
 
         for idx, q in enumerate(queries, 1):
             suggs = fetch_query_suggestions(page, input_locator, q)
@@ -144,28 +201,58 @@ def collect_playstore_suggestions(queries: List[str], hl: str = "en", gl: str = 
     return all_suggestions
 
 
-def check_app_count(keyword: str, hl: str = "en", gl: str = "us", max_retries: int = MAX_RETRIES) -> int:
-    """Mengecek jumlah aplikasi yang muncul untuk keyword di Play Store."""
+def check_keyword_competition(keyword: str, hl: str = "en", gl: str = "us", max_retries: int = MAX_RETRIES) -> Tuple[int, int, List[str]]:
+    """
+    Mengecek jumlah total aplikasi dan jumlah aplikasi yang relevan di Play Store.
+    Mengembalikan: (total_hasil, hasil_relevan, daftar_app_relevan)
+    """
     for attempt in range(max_retries + 1):
         try:
             kwargs = {"lang": hl}
             if gl:
                 kwargs["country"] = gl
             results = gps.search(keyword, **kwargs)
-            return len(results) if results else 0
+            if not results:
+                return 0, 0, []
+
+            relevant_apps = []
+            for app in results:
+                if is_app_relevant(keyword, app):
+                    title = (app.get("title") or "").strip()
+                    app_id = (app.get("appId") or "").strip()
+                    relevant_apps.append(f"{title} ({app_id})" if app_id else title)
+
+            return len(results), len(relevant_apps), relevant_apps
+
         except (NotFoundError, TypeError, IndexError):
             # Dataset kosong (0 hasil) pada google-play-scraper
-            return 0
+            return 0, 0, []
         except Exception as e:
             if attempt < max_retries:
                 time.sleep(1.0)
             else:
                 print(f"  [Error] Gagal cek hasil untuk '{keyword}': {e}")
-                return -1
-    return -1
+                return -1, -1, []
+    return -1, -1, []
 
 
-def load_existing_results(filename: str) -> Dict[str, int]:
+def get_csv_filenames(seed: str, extra: str = "", prefix: str = "") -> Dict[str, str]:
+    """Menghasilkan nama file CSV otomatis per seed agar tidak bertabrakan."""
+    if prefix:
+        base_prefix = prefix
+    else:
+        full_seed = f"{seed}_{extra}".strip("_") if extra else seed.strip()
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", full_seed.lower()).strip("_")
+        base_prefix = f"hasil_{slug}" if slug else "hasil"
+
+    return {
+        "all": f"{base_prefix}_semua.csv",
+        "zero": f"{base_prefix}_nol.csv",
+        "few": f"{base_prefix}_sedikit.csv",
+    }
+
+
+def load_existing_results(filename: str) -> Dict[str, Tuple[int, int, str]]:
     """Membaca file CSV untuk mendukung resume jika sebelumnya terhenti."""
     results = {}
     if os.path.exists(filename):
@@ -174,31 +261,36 @@ def load_existing_results(filename: str) -> Dict[str, int]:
                 reader = csv.reader(f)
                 header = next(reader, None)
                 for row in reader:
-                    if row and len(row) >= 2:
+                    if row and len(row) >= 3:
                         kw = row[0].strip()
                         try:
-                            count = int(row[1].strip())
+                            tot = int(row[1].strip())
                         except ValueError:
-                            count = -1
-                        results[kw] = count
+                            tot = -1
+                        try:
+                            rel = int(row[2].strip())
+                        except ValueError:
+                            rel = -1
+                        apps = row[3].strip() if len(row) >= 4 else ""
+                        results[kw] = (tot, rel, apps)
         except Exception as e:
             print(f"[Warning] Gagal membaca existing CSV: {e}")
     return results
 
 
-def append_csv(filename: str, row: List):
+def append_csv(filename: str, row: List, header: List[str] = CSV_HEADER):
     """Menambahkan satu baris ke file CSV dan langsung flush ke disk."""
     file_exists = os.path.exists(filename)
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         if not file_exists or os.path.getsize(filename) == 0:
-            writer.writerow(["keyword", "jumlah_hasil"])
+            writer.writerow(header)
         writer.writerow(row)
         f.flush()
 
 
 def run_test_mode(seed: str, hl: str, gl: str, headless: bool):
-    """Mode tes cepat: hanya uji 1 query untuk memverifikasi alur Playwright & Scraper."""
+    """Mode tes cepat: hanya uji 1 query untuk memverifikasi alur Playwright, Scraper, & Relevansi."""
     print("=" * 60)
     print("ASO-GAP: Mode Tes Cepat (--test)")
     print(f"Seed: '{seed}' | Target: {hl}-{gl} | Headless: {headless}")
@@ -214,20 +306,30 @@ def run_test_mode(seed: str, hl: str, gl: str, headless: bool):
         print(f"  {idx}. {s}")
 
     first_kw = suggs[0]
-    print(f"\nMemeriksa jumlah aplikasi untuk: '{first_kw}'...")
-    count = check_app_count(first_kw, hl=hl, gl=gl)
-    print(f"Hasil: {count} aplikasi terdeteksi di Play Store.")
-    print("\nTes berhasil! Alur Playwright dan scraper bekerja normal.")
+    print(f"\nMemeriksa relevansi & jumlah aplikasi untuk: '{first_kw}'...")
+    total_count, rel_count, rel_apps = check_keyword_competition(first_kw, hl=hl, gl=gl)
+    print(f"Hasil: {rel_count} aplikasi relevan dari total {total_count} aplikasi terdeteksi.")
+    if rel_apps:
+        print(f"Aplikasi relevan ({len(rel_apps)}):")
+        for app_str in rel_apps[:5]:
+            print(f"  * {app_str}")
+        if len(rel_apps) > 5:
+            print(f"  ... dan {len(rel_apps) - 5} lainnya (semua dicatat di CSV).")
+    else:
+        print("Catatan: Tidak ada aplikasi yang relevan (celah kompetisi murni).")
+
+    print("\nTes berhasil! Alur Playwright dan analisis relevansi bekerja normal.")
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="ASO-GAP: Mencari keyword gap di Google Play Store menggunakan Playwright.",
+        description="ASO-GAP: Mencari keyword gap & relevansi kompetitor di Google Play Store.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""Contoh penggunaan:
   python scrape.py "photo editor"
   python scrape.py "editor foto" --hl id --gl id
   python scrape.py "fitness tracker" --extra "app"
+  python scrape.py "photo editor" --resume
   python scrape.py "photo editor" --test
 """
     )
@@ -256,7 +358,17 @@ def parse_arguments():
         "--max-few",
         type=int,
         default=3,
-        help="Batas maksimal jumlah hasil untuk masuk hasil_sedikit.csv. Default: 3."
+        help="Batas maksimal hasil relevan untuk masuk hasil_<seed>_sedikit.csv. Default: 3."
+    )
+    parser.add_argument(
+        "--prefix",
+        default="",
+        help="Prefix kustom untuk nama file CSV hasil (Default: hasil_<seed>)."
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Lanjutkan proses scraping dari file CSV yang sudah ada tanpa menimpanya."
     )
     parser.add_argument(
         "--headful",
@@ -294,28 +406,34 @@ def main():
         run_test_mode(seed, hl=args.hl, gl=args.gl, headless=headless)
         return
 
+    csv_files = get_csv_filenames(seed, args.extra, args.prefix)
+
     print("=" * 60)
-    print("ASO-GAP: Play Store Keyword Gap Hunter")
+    print("ASO-GAP: Play Store Keyword Gap & Relevance Hunter")
     print(f"Seed: '{seed}' | Extra: '{args.extra}' | Target: {args.hl}-{args.gl} | Headless: {headless}")
+    print(f"Output: {csv_files['all']}, {csv_files['few']}, {csv_files['zero']}")
     print("=" * 60)
 
     # 1. Kumpulkan suggestion via Playwright
     queries = get_queries(seed, args.extra)
     suggestions = collect_playstore_suggestions(queries, hl=args.hl, gl=args.gl, headless=headless)
 
-    # 2. Cek resume state
-    existing = load_existing_results(CSV_ALL)
-    if existing:
-        print(f"[Resume] Ditemukan {len(existing)} keyword yang sudah diperiksa di {CSV_ALL}.")
-
-    # Pastikan header sudah ada jika file baru
-    for path in [CSV_ALL, CSV_ZERO, CSV_FEW]:
-        if not os.path.exists(path) or os.path.getsize(path) == 0:
+    # 2. Cek resume state vs fresh start
+    existing = {}
+    if args.resume and os.path.exists(csv_files["all"]):
+        existing = load_existing_results(csv_files["all"])
+        print(f"[Resume] Ditemukan {len(existing)} keyword yang sudah diperiksa di {csv_files['all']}.")
+    else:
+        # Jika bukan resume, inisialisasi file baru bersih (timpa jika file dengan nama sama sudah ada)
+        for key in ["all", "zero", "few"]:
+            path = csv_files[key]
             with open(path, mode="w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["keyword", "jumlah_hasil"])
+                writer.writerow(CSV_HEADER)
+        if os.path.exists(csv_files["all"]) and not args.resume:
+            print(f"[Fresh Start] Memulai pencarian baru (output bersih di {csv_files['all']}).")
 
-    print(f"[2/2] Memeriksa jumlah hasil di Play Store untuk {len(suggestions)} keyword...")
+    print(f"[2/2] Memeriksa jumlah & relevansi hasil di Play Store untuk {len(suggestions)} keyword...")
 
     total_checked = 0
     total_zero = 0
@@ -323,23 +441,31 @@ def main():
 
     for idx, kw in enumerate(suggestions, 1):
         if kw in existing:
-            count = existing[kw]
-            print(f"  [{idx}/{len(suggestions)}] '{kw}' -> {count} hasil (dari cache/resume)")
+            tot, rel, apps = existing[kw]
+            print(f"  [{idx}/{len(suggestions)}] '{kw}' -> {rel} relevan / {tot} total (dari resume)")
         else:
-            count = check_app_count(kw, hl=args.hl, gl=args.gl)
-            row = [kw, count]
-            append_csv(CSV_ALL, row)
+            tot, rel, rel_apps = check_keyword_competition(kw, hl=args.hl, gl=args.gl)
+            apps_str = " | ".join(rel_apps)
+            row = [kw, tot, rel, apps_str]
 
-            if count == 0:
-                append_csv(CSV_ZERO, row)
+            append_csv(csv_files["all"], row, CSV_HEADER)
+
+            # Masuk ke hasil_nol jika HASIL RELEVAN == 0
+            if rel == 0:
+                append_csv(csv_files["zero"], row, CSV_HEADER)
                 total_zero += 1
-            if 0 <= count <= args.max_few:
-                append_csv(CSV_FEW, row)
+
+            # Masuk ke hasil_sedikit jika 0 <= HASIL RELEVAN <= max_few
+            if 0 <= rel <= args.max_few:
+                append_csv(csv_files["few"], row, CSV_HEADER)
                 total_few += 1
 
-            existing[kw] = count
+            existing[kw] = (tot, rel, apps_str)
             total_checked += 1
-            print(f"  [{idx}/{len(suggestions)}] '{kw}' -> {count} hasil")
+
+            # Cuplikan singkat di console (1-2 nama app)
+            preview_apps = f" | Contoh: {rel_apps[0]}" if rel_apps else " | Tidak ada kompetitor relevan"
+            print(f"  [{idx}/{len(suggestions)}] '{kw}' -> {rel} relevan / {tot} total{preview_apps}")
 
             # Jeda kecil antar pengecekan API
             time.sleep(random.uniform(0.8, 1.6))
@@ -347,7 +473,9 @@ def main():
     print("\n" + "=" * 60)
     print("Selesai!")
     print(f"- Total keyword: {len(existing)}")
-    print(f"- Disimpan ke: {CSV_ALL}, {CSV_ZERO}, {CSV_FEW}")
+    print(f"- Keyword dengan 0 kompetitor relevan: {total_zero}")
+    print(f"- Keyword dengan <= {args.max_few} kompetitor relevan: {total_few}")
+    print(f"- File tersimpan di: {csv_files['all']}, {csv_files['few']}, {csv_files['zero']}")
     print("=" * 60)
 
 
